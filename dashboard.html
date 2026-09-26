@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Proxy Analytics Dashboard</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-900 text-white font-sans p-8">
+    <div class="max-w-4xl mx-auto">
+        <h1 class="text-3xl font-bold mb-2">Caching Proxy Dashboard</h1>
+        <p class="text-gray-400 mb-8">Origin Server: <span id="origin-url" class="text-blue-400 font-mono">Loading...</span></p>
+
+        <!-- Stats Grid -->
+        <div class="grid grid-cols-2 gap-6 mb-8">
+            <div class="bg-gray-800 p-6 rounded-lg shadow-lg border border-gray-700">
+                <h2 class="text-xl font-semibold text-gray-300">Total Hits</h2>
+                <p id="hit-count" class="text-5xl font-bold text-green-500 mt-4">0</p>
+            </div>
+            <div class="bg-gray-800 p-6 rounded-lg shadow-lg border border-gray-700">
+                <h2 class="text-xl font-semibold text-gray-300">Total Misses</h2>
+                <p id="miss-count" class="text-5xl font-bold text-red-500 mt-4">0</p>
+            </div>
+        </div>
+
+        <!-- Cached URLs List -->
+        <div class="bg-gray-800 p-6 rounded-lg shadow-lg border border-gray-700">
+            <h2 class="text-xl font-semibold text-gray-300 mb-4">Currently Cached Routes</h2>
+            <ul id="url-list" class="space-y-2 font-mono text-sm text-gray-400">
+                <li>No URLs cached yet.</li>
+            </ul>
+        </div>
+    </div>
+
+    <script>
+        async function fetchStats() {
+            try {
+                const response = await fetch('/api/dashboard-stats');
+                const data = await response.json();
+
+                // Update text elements
+                document.getElementById('hit-count').innerText = data.hits;
+                document.getElementById('miss-count').innerText = data.misses;
+                document.getElementById('origin-url').innerText = data.origin;
+
+                // Update URL list
+                const urlList = document.getElementById('url-list');
+                urlList.innerHTML = ''; 
+                
+                if (data.cached_urls.length === 0) {
+                    urlList.innerHTML = '<li>No URLs cached yet.</li>';
+                } else {
+                    data.cached_urls.forEach(url => {
+                        const li = document.createElement('li');
+                        li.className = "bg-gray-700 p-2 rounded truncate";
+                        li.innerText = url;
+                        urlList.appendChild(li);
+                    });
+                }
+            } catch (error) {
+                console.error("Error fetching stats:", error);
+            }
+        }
+
+        // Fetch immediately, then refresh every 2 seconds
+        fetchStats();
+        setInterval(fetchStats, 2000);
+    </script>
+</body>
+</html>

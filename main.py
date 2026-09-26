@@ -2,19 +2,44 @@ import argparse
 import sys
 import requests
 import uvicorn
+import os
 from fastapi import FastAPI, Request, Response
+from fastapi.responses import HTMLResponse
 
 app = FastAPI()
 
 ORIGIN_URL = ""
 cache_store = {} 
+# New dictionary to track our analytics
+analytics = {"hits": 0, "misses": 0}
 
-# A dedicated internal route to handle the clear-cache command
 @app.post("/clear-internal-cache")
 async def clear_internal_cache():
     cache_store.clear()
+    analytics["hits"] = 0
+    analytics["misses"] = 0
     return {"status": "success", "message": "In-memory cache wiped."}
 
+# Endpoint to serve the raw JSON data for our dashboard
+@app.get("/api/dashboard-stats")
+async def get_dashboard_stats():
+    return {
+        "hits": analytics["hits"],
+        "misses": analytics["misses"],
+        "cached_urls": list(cache_store.keys()),
+        "origin": ORIGIN_URL
+    }
+
+# Endpoint to serve the HTML webpage
+@app.get("/dashboard")
+async def serve_dashboard():
+    try:
+        with open("dashboard.html", "r") as f:
+            return HTMLResponse(content=f.read())
+    except FileNotFoundError:
+        return Response(content="dashboard.html not found.", status_code=404)
+
+# The catch-all proxy route MUST remain at the bottom
 @app.get("/{path:path}")
 async def proxy_request(path: str, request: Request):
     global ORIGIN_URL
@@ -25,6 +50,8 @@ async def proxy_request(path: str, request: Request):
         
     if target_url in cache_store:
         print(f"Cache HIT: {target_url}")
+        analytics["hits"] += 1  # Increment hit counter
+        
         cached_data = cache_store[target_url]
         headers = cached_data["headers"].copy()
         headers["X-Cache"] = "HIT"
@@ -38,15 +65,24 @@ async def proxy_request(path: str, request: Request):
     print(f"Cache MISS: {target_url}")
     try:
         origin_response = requests.get(target_url)
-        origin_headers = dict(origin_response.headers)
         
+        # Clean the headers by removing compression and chunking headers
+        clean_headers = {}
+        for key, value in origin_response.headers.items():
+            if key.lower() not in ['content-encoding', 'transfer-encoding', 'connection']:
+                clean_headers[key] = value
+                
+        # Save the fresh data and the CLEANED headers into our dictionary
         cache_store[target_url] = {
             "content": origin_response.content,
             "status_code": origin_response.status_code,
-            "headers": origin_headers
+            "headers": clean_headers
         }
         
-        response_headers = origin_headers.copy()
+        analytics["misses"] += 1
+        
+        # Inject the X-Cache header
+        response_headers = clean_headers.copy()
         response_headers["X-Cache"] = "MISS"
         
         return Response(
@@ -69,11 +105,9 @@ def main():
     
     args = parser.parse_args()
 
-    # The updated cache clearing logic
     if args.clear_cache:
         print("Sending clear cache command to the running server...")
         try:
-            # We fire a POST request to the hidden endpoint on the local server
             response = requests.post(f"http://127.0.0.1:{args.port}/clear-internal-cache")
             if response.status_code == 200:
                 print("Cache cleared successfully.")
@@ -89,6 +123,7 @@ def main():
     ORIGIN_URL = args.origin.rstrip("/")
     
     print(f"Starting proxy server on port {args.port}...")
+    print(f"Dashboard available at: http://127.0.0.1:{args.port}/dashboard")
     print(f"Forwarding requests to origin: {ORIGIN_URL}")
     
     uvicorn.run(app, host="127.0.0.1", port=args.port)
